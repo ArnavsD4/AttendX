@@ -87,6 +87,8 @@ def student_screen():
     # Back button — top left
     if st.button("← Back to Home", type='secondary', key='student_back'):
         st.session_state['login_type'] = None
+        if 'show_reg' in st.session_state:
+            del st.session_state['show_reg']
         st.rerun()
 
     st.markdown("<br>", unsafe_allow_html=True)
@@ -100,10 +102,13 @@ def student_screen():
         </p>
     """, unsafe_allow_html=True)
 
-    show_registration = False
+    # 1. Initialize registration state if not present
+    if "show_reg" not in st.session_state:
+        st.session_state.show_reg = False
+
     photo_source = st.camera_input("Position your face in the center")
 
-    if photo_source:
+    if photo_source and not st.session_state.show_reg:
         img = np.array(Image.open(photo_source))
         with st.spinner('AI is scanning your face...'):
             detected, all_ids, num_faces = predict_attendance(img)
@@ -115,7 +120,8 @@ def student_screen():
                 if detected:
                     student_id = list(detected.keys())[0]
                     all_students = get_all_students()
-                    student = next((s for s in all_students if s['student_id'] == student_id), None)
+                    student = next((s for s in all_students if int(s['student_id']) == int(student_id)), None)
+                    
                     if student:
                         st.session_state.is_logged_in = True
                         st.session_state.user_role = 'student'
@@ -123,11 +129,19 @@ def student_screen():
                         st.toast(f"Welcome back, {student['name']}!")
                         time.sleep(1)
                         st.rerun()
+                    else:
+                        # Face was "detected" by ML model but doesn't exist in DB
+                        st.info("Face not recognized in our system. Register below.")
+                        st.session_state.show_reg = True
+                        st.rerun()
                 else:
+                    # Model explicitly didn't recognize the face
                     st.info("Face not recognized. You may be a new student — register below.")
-                    show_registration = True
+                    st.session_state.show_reg = True
+                    st.rerun()
 
-    if show_registration:
+    # 2. Render registration UI based on the persistent session state
+    if st.session_state.show_reg:
         st.divider()
         st.markdown("""
             <div style="font-family:'Plus Jakarta Sans',sans-serif;
@@ -135,9 +149,11 @@ def student_screen():
                 Create your profile
             </div>
         """, unsafe_allow_html=True)
+        
         new_name = st.text_input("Your full name", placeholder='e.g. Riya Sharma')
+        
         if st.button('Create Account', type='primary'):
-            if new_name:
+            if new_name and photo_source:
                 with st.spinner('Creating your profile...'):
                     img = np.array(Image.open(photo_source))
                     encodings = get_face_embeddings(img)
@@ -149,12 +165,18 @@ def student_screen():
                             st.session_state.is_logged_in = True
                             st.session_state.user_role = 'student'
                             st.session_state.student_data = response_data[0]
+                            
+                            # Clean up the registration flag before moving to dashboard
+                            del st.session_state.show_reg 
+                            
                             st.toast(f"Profile created! Welcome, {new_name}!")
                             time.sleep(1)
                             st.rerun()
                     else:
                         st.error('Could not capture your face clearly. Please try again.')
-            else:
+            elif not new_name:
                 st.warning('Please enter your name.')
+            elif not photo_source:
+                st.warning('Please provide a camera image first.')
 
     footer_dashboard()
